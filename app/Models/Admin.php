@@ -6,6 +6,7 @@ use Database\Factories\AdminFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Laravel\Sanctum\HasApiTokens;
 
@@ -17,6 +18,11 @@ class Admin extends Authenticatable
     use HasApiTokens, HasFactory;
 
     public const ACCESS_ABILITY = 'admin:access';
+
+    public function reviewedKycApplications(): HasMany
+    {
+        return $this->hasMany(ExpertKycApplication::class, 'reviewed_by_admin_id');
+    }
 
     /**
      * Get the attributes that should be cast.

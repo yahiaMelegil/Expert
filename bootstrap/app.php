@@ -1,5 +1,7 @@
 <?php
 
+use App\Exceptions\InvalidKycTransitionException;
+use App\Http\Middleware\EnsureExpertEmailIsVerified;
 use App\Http\Middleware\EnsureUserIsAdmin;
 use App\Http\Middleware\EnsureUserIsExpert;
 use App\Http\Middleware\EnsureUserIsRegularUser;
@@ -13,6 +15,7 @@ use Illuminate\Routing\Exceptions\InvalidSignatureException;
 use Illuminate\Validation\ValidationException;
 use Laravel\Sanctum\Http\Middleware\CheckAbilities;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -26,6 +29,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'abilities' => CheckAbilities::class,
             'admin' => EnsureUserIsAdmin::class,
             'expert' => EnsureUserIsExpert::class,
+            'expert.verified' => EnsureExpertEmailIsVerified::class,
             'regular-user' => EnsureUserIsRegularUser::class,
         ]);
     })
@@ -110,5 +114,27 @@ return Application::configure(basePath: dirname(__DIR__))
                 'status' => false,
                 'message' => 'The email verification link is invalid or has expired.',
             ], 403);
+        });
+
+        $exceptions->render(function (InvalidKycTransitionException $exception, Request $request) {
+            if (! $request->is('api/expert/kyc*', 'api/admin/kyc*')) {
+                return null;
+            }
+
+            return response()->json([
+                'status' => false,
+                'message' => $exception->getMessage(),
+            ], 409);
+        });
+
+        $exceptions->render(function (NotFoundHttpException $exception, Request $request) {
+            if (! $request->is('api/expert/kyc*', 'api/admin/kyc*')) {
+                return null;
+            }
+
+            return response()->json([
+                'status' => false,
+                'message' => 'The requested KYC resource was not found.',
+            ], 404);
         });
     })->create();

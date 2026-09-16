@@ -11,11 +11,13 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 
-#[Fillable(['name', 'email', 'password', 'is_active', 'kyc_status'])]
+#[Fillable(['name', 'email', 'country', 'language', 'domain', 'password', 'is_active'])]
 #[Hidden(['password', 'remember_token'])]
 class Expert extends Authenticatable implements MustVerifyEmail
 {
@@ -50,6 +52,16 @@ class Expert extends Authenticatable implements MustVerifyEmail
     public function sendPasswordResetNotification(#[\SensitiveParameter] $token): void
     {
         $this->notify(new ResetPasswordNotification($token));
+    }
+
+    public function kycApplications(): HasMany
+    {
+        return $this->hasMany(ExpertKycApplication::class);
+    }
+
+    public function latestKycApplication(): HasOne
+    {
+        return $this->hasOne(ExpertKycApplication::class)->ofMany('attempt_number', 'max');
     }
 
     /**

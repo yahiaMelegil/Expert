@@ -40,6 +40,9 @@ class RegisterRequest extends FormRequest
         return [
             'name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'string', 'email', 'max:255', 'unique:experts,email'],
+            'country' => ['sometimes', 'nullable', 'string', 'max:16'],
+            'language' => ['sometimes', 'nullable', 'string', 'max:16'],
+            'domain' => ['sometimes', 'nullable', 'string', 'max:50'],
             'password' => ['required', 'string', Password::min(8), 'confirmed'],
             'device_name' => ['sometimes', 'nullable', 'string', 'max:255'],
         ];

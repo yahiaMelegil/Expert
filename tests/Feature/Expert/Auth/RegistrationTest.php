@@ -27,6 +27,9 @@ class RegistrationTest extends TestCase
         $response = $this->postJson('/api/expert/auth/register', [
             'name' => '  Ahmad Ali  ',
             'email' => 'Expert@Example.com',
+            'country' => 'JO',
+            'language' => 'ar',
+            'domain' => 'legal',
             'password' => 'password123',
             'password_confirmation' => 'password123',
             'device_name' => '  Expert Dashboard  ',
@@ -38,6 +41,9 @@ class RegistrationTest extends TestCase
             ->assertJsonPath('message', 'Expert account created successfully. Please verify your email address.')
             ->assertJsonPath('data.expert.name', 'Ahmad Ali')
             ->assertJsonPath('data.expert.email', 'expert@example.com')
+            ->assertJsonPath('data.expert.country', 'JO')
+            ->assertJsonPath('data.expert.language', 'ar')
+            ->assertJsonPath('data.expert.domain', 'legal')
             ->assertJsonPath('data.expert.email_verified_at', null)
             ->assertJsonPath('data.expert.is_active', true)
             ->assertJsonPath('data.email_verified', false)
@@ -51,6 +57,9 @@ class RegistrationTest extends TestCase
 
         $this->assertTrue(Hash::check('password123', $expert->password));
         $this->assertFalse($expert->hasVerifiedEmail());
+        $this->assertSame('JO', $expert->country);
+        $this->assertSame('ar', $expert->language);
+        $this->assertSame('legal', $expert->domain);
         $this->assertSame(ExpertKycStatus::NotSubmitted, $expert->kyc_status);
         $this->assertNotNull($token);
         $this->assertTrue($token->can(Expert::ACCESS_ABILITY));

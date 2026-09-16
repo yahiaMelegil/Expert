@@ -1,10 +1,12 @@
 <?php
 
 use App\Http\Controllers\Api\Admin\AuthController as AdminAuthController;
+use App\Http\Controllers\Api\Admin\KycController as AdminKycController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\Expert\Auth\AuthController as ExpertAuthController;
 use App\Http\Controllers\Api\Expert\Auth\EmailVerificationController as ExpertEmailVerificationController;
 use App\Http\Controllers\Api\Expert\Auth\PasswordController as ExpertPasswordController;
+use App\Http\Controllers\Api\Expert\KycController as ExpertKycController;
 use App\Http\Controllers\Api\User\Auth\EmailVerificationController as UserEmailVerificationController;
 use App\Http\Controllers\Api\User\Auth\PasswordController as UserPasswordController;
 use Illuminate\Support\Facades\Route;
@@ -13,6 +15,30 @@ Route::middleware('throttle:5,1')->group(function (): void {
     Route::post('/register', [AuthController::class, 'register'])->name('auth.register');
     Route::post('/login', [AuthController::class, 'login'])->name('auth.login');
 });
+
+Route::prefix('admin/kyc')->name('admin.kyc.')
+    ->middleware(['auth:sanctum', 'admin', 'abilities:admin:access'])
+    ->group(function (): void {
+        Route::get('/applications', [AdminKycController::class, 'index'])->name('applications.index');
+        Route::get('/applications/{application}', [AdminKycController::class, 'show'])->name('applications.show');
+        Route::post('/applications/{application}/start-review', [AdminKycController::class, 'startReview'])
+            ->middleware('throttle:admin-kyc-decisions')
+            ->name('applications.start-review');
+        Route::put('/applications/{application}/documents/{document}/review', [AdminKycController::class, 'reviewDocument'])
+            ->middleware('throttle:admin-kyc-decisions')
+            ->name('documents.review');
+        Route::get('/applications/{application}/documents/{document}', [AdminKycController::class, 'download'])
+            ->name('documents.show');
+        Route::post('/applications/{application}/approve', [AdminKycController::class, 'approve'])
+            ->middleware('throttle:admin-kyc-decisions')
+            ->name('applications.approve');
+        Route::post('/applications/{application}/reject', [AdminKycController::class, 'reject'])
+            ->middleware('throttle:admin-kyc-decisions')
+            ->name('applications.reject');
+        Route::post('/applications/{application}/request-information', [AdminKycController::class, 'requestInformation'])
+            ->middleware('throttle:admin-kyc-decisions')
+            ->name('applications.request-information');
+    });
 
 Route::post('/forgot-password', [UserPasswordController::class, 'forgot'])
     ->middleware('throttle:user-password-forgot')
@@ -32,6 +58,26 @@ Route::middleware(['auth:sanctum', 'regular-user', 'abilities:user:access'])->gr
     Route::post('/logout', [AuthController::class, 'logout'])->name('auth.logout');
     Route::post('/logout-all', [AuthController::class, 'logoutAll'])->name('auth.logout-all');
 });
+
+Route::prefix('expert/kyc')->name('expert.kyc.')
+    ->middleware(['auth:sanctum', 'expert', 'abilities:expert:access', 'expert.verified'])
+    ->group(function (): void {
+        Route::get('/', [ExpertKycController::class, 'show'])->name('show');
+        Route::put('/', [ExpertKycController::class, 'update'])
+            ->middleware('throttle:expert-kyc-write')
+            ->name('update');
+        Route::post('/documents', [ExpertKycController::class, 'upload'])
+            ->middleware('throttle:expert-kyc-upload')
+            ->name('documents.store');
+        Route::delete('/documents/{document}', [ExpertKycController::class, 'destroy'])
+            ->middleware('throttle:expert-kyc-write')
+            ->name('documents.destroy');
+        Route::get('/documents/{document}', [ExpertKycController::class, 'download'])
+            ->name('documents.show');
+        Route::post('/submit', [ExpertKycController::class, 'submit'])
+            ->middleware('throttle:expert-kyc-submit')
+            ->name('submit');
+    });
 
 Route::prefix('admin/auth')->name('admin.auth.')->group(function (): void {
     Route::post('/login', [AdminAuthController::class, 'login'])

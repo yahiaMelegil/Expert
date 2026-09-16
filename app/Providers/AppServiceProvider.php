@@ -99,6 +99,18 @@ class AppServiceProvider extends ServiceProvider
                 Limit::perMinute(20)->by('expert-password-reset|'.$request->ip()),
             ];
         });
+
+        RateLimiter::for('expert-kyc-write', fn (Request $request): Limit => Limit::perMinute(30)
+            ->by($this->authenticatedKey($request)));
+
+        RateLimiter::for('expert-kyc-upload', fn (Request $request): Limit => Limit::perMinute(15)
+            ->by($this->authenticatedKey($request)));
+
+        RateLimiter::for('expert-kyc-submit', fn (Request $request): Limit => Limit::perMinute(5)
+            ->by($this->authenticatedKey($request)));
+
+        RateLimiter::for('admin-kyc-decisions', fn (Request $request): Limit => Limit::perMinute(30)
+            ->by($this->authenticatedKey($request)));
     }
 
     private function emailAndIpKey(Request $request): string
@@ -106,5 +118,10 @@ class AppServiceProvider extends ServiceProvider
         $email = mb_strtolower(trim((string) $request->input('email')));
 
         return $email.'|'.$request->ip();
+    }
+
+    private function authenticatedKey(Request $request): string
+    {
+        return ($request->user()?->getAuthIdentifier() ?? 'guest').'|'.$request->ip();
     }
 }

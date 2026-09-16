@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers\Api\Expert\Auth;
 
-use App\Enums\ExpertKycStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Expert\Auth\LoginRequest;
 use App\Http\Requests\Expert\Auth\RegisterRequest;
@@ -26,10 +25,14 @@ class AuthController extends Controller
             $expert = Expert::create([
                 'name' => $validated['name'],
                 'email' => $validated['email'],
+                'country' => $validated['country'] ?? null,
+                'language' => $validated['language'] ?? null,
+                'domain' => $validated['domain'] ?? null,
                 'password' => Hash::make($validated['password']),
                 'is_active' => true,
-                'kyc_status' => ExpertKycStatus::NotSubmitted,
             ]);
+
+            $expert->refresh();
 
             return [
                 $expert,
@@ -62,6 +65,9 @@ class AuthController extends Controller
                 'name',
                 'email',
                 'email_verified_at',
+                'country',
+                'language',
+                'domain',
                 'password',
                 'is_active',
                 'kyc_status',
