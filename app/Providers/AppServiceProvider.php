@@ -111,6 +111,18 @@ class AppServiceProvider extends ServiceProvider
 
         RateLimiter::for('admin-kyc-decisions', fn (Request $request): Limit => Limit::perMinute(30)
             ->by($this->authenticatedKey($request)));
+
+        RateLimiter::for('expert-profile-write', fn (Request $request): Limit => Limit::perMinute(20)
+            ->by($this->authenticatedKey($request)));
+
+        RateLimiter::for('expert-profile-avatar', fn (Request $request): Limit => Limit::perMinute(10)
+            ->by($this->authenticatedKey($request)));
+
+        RateLimiter::for('expert-profile-publish', fn (Request $request): Limit => Limit::perMinute(5)
+            ->by($this->authenticatedKey($request)));
+
+        RateLimiter::for('public-expert-profile', fn (Request $request): Limit => Limit::perMinute(120)
+            ->by($request->ip()));
     }
 
     private function emailAndIpKey(Request $request): string

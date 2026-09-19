@@ -5,8 +5,10 @@ namespace App\Http\Controllers\Api\Admin;
 use App\Enums\ExpertKycApplicationStatus;
 use App\Exceptions\InvalidKycTransitionException;
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Admin\Kyc\ApproveKycApplicationRequest;
 use App\Http\Requests\Admin\Kyc\KycDecisionRequest;
 use App\Http\Requests\Admin\Kyc\ListKycApplicationsRequest;
+use App\Http\Requests\Admin\Kyc\RequestKycInformationRequest;
 use App\Http\Requests\Admin\Kyc\ReviewKycDocumentRequest;
 use App\Http\Resources\Admin\Kyc\KycApplicationDetailResource;
 use App\Http\Resources\Admin\Kyc\KycApplicationSummaryResource;
@@ -140,13 +142,16 @@ class KycController extends Controller
         );
     }
 
-    public function approve(Request $request, ExpertKycApplication $application): JsonResponse
+    public function approve(
+        ApproveKycApplicationRequest $request,
+        ExpertKycApplication $application,
+    ): JsonResponse
     {
         /** @var Admin $admin */
         $admin = $request->user();
 
         return $this->applicationResponse(
-            $this->workflow->approve($application, $admin),
+            $this->workflow->approve($application, $admin, $request->validated('scopes', [])),
             'KYC application approved successfully.',
         );
     }
@@ -162,13 +167,21 @@ class KycController extends Controller
         );
     }
 
-    public function requestInformation(KycDecisionRequest $request, ExpertKycApplication $application): JsonResponse
+    public function requestInformation(
+        RequestKycInformationRequest $request,
+        ExpertKycApplication $application,
+    ): JsonResponse
     {
         /** @var Admin $admin */
         $admin = $request->user();
 
         return $this->applicationResponse(
-            $this->workflow->requestInformation($application, $admin, $request->validated('reason')),
+            $this->workflow->requestInformation(
+                $application,
+                $admin,
+                $request->validated('reason'),
+                $request->validated('requestedChanges'),
+            ),
             'Additional information requested successfully.',
         );
     }

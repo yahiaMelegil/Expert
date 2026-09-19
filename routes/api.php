@@ -7,6 +7,9 @@ use App\Http\Controllers\Api\Expert\Auth\AuthController as ExpertAuthController;
 use App\Http\Controllers\Api\Expert\Auth\EmailVerificationController as ExpertEmailVerificationController;
 use App\Http\Controllers\Api\Expert\Auth\PasswordController as ExpertPasswordController;
 use App\Http\Controllers\Api\Expert\KycController as ExpertKycController;
+use App\Http\Controllers\Api\Expert\Profile\AvailabilityController as ExpertAvailabilityController;
+use App\Http\Controllers\Api\Expert\Profile\ProfessionalProfileController as ExpertProfileController;
+use App\Http\Controllers\Api\PublicApi\ExpertProfileController as PublicExpertProfileController;
 use App\Http\Controllers\Api\User\Auth\EmailVerificationController as UserEmailVerificationController;
 use App\Http\Controllers\Api\User\Auth\PasswordController as UserPasswordController;
 use Illuminate\Support\Facades\Route;
@@ -58,6 +61,37 @@ Route::middleware(['auth:sanctum', 'regular-user', 'abilities:user:access'])->gr
     Route::post('/logout', [AuthController::class, 'logout'])->name('auth.logout');
     Route::post('/logout-all', [AuthController::class, 'logoutAll'])->name('auth.logout-all');
 });
+
+Route::get('/experts/{profile:slug}', [PublicExpertProfileController::class, 'show'])
+    ->middleware('throttle:public-expert-profile')
+    ->name('experts.show');
+
+Route::prefix('expert')->name('expert.')
+    ->middleware(['auth:sanctum', 'expert', 'abilities:expert:access', 'expert.verified'])
+    ->group(function (): void {
+        Route::get('/profile', [ExpertProfileController::class, 'show'])->name('profile.show');
+        Route::put('/profile', [ExpertProfileController::class, 'update'])
+            ->middleware('throttle:expert-profile-write')
+            ->name('profile.update');
+        Route::post('/profile/avatar', [ExpertProfileController::class, 'uploadAvatar'])
+            ->middleware('throttle:expert-profile-avatar')
+            ->name('profile.avatar.store');
+        Route::delete('/profile/avatar', [ExpertProfileController::class, 'deleteAvatar'])
+            ->middleware('throttle:expert-profile-write')
+            ->name('profile.avatar.destroy');
+        Route::get('/profile/preview', [ExpertProfileController::class, 'preview'])->name('profile.preview');
+        Route::post('/profile/publish', [ExpertProfileController::class, 'publish'])
+            ->middleware('throttle:expert-profile-publish')
+            ->name('profile.publish');
+        Route::post('/profile/unpublish', [ExpertProfileController::class, 'unpublish'])
+            ->middleware('throttle:expert-profile-publish')
+            ->name('profile.unpublish');
+        Route::get('/verified-scopes', [ExpertProfileController::class, 'scopes'])->name('verified-scopes.index');
+        Route::get('/availability', [ExpertAvailabilityController::class, 'show'])->name('availability.show');
+        Route::put('/availability', [ExpertAvailabilityController::class, 'update'])
+            ->middleware('throttle:expert-profile-write')
+            ->name('availability.update');
+    });
 
 Route::prefix('expert/kyc')->name('expert.kyc.')
     ->middleware(['auth:sanctum', 'expert', 'abilities:expert:access', 'expert.verified'])

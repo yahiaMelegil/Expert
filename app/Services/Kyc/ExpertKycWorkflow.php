@@ -6,12 +6,15 @@ use App\Enums\ExpertKycActorType;
 use App\Enums\ExpertKycApplicationStatus;
 use App\Enums\ExpertKycDocumentType;
 use App\Enums\ExpertKycStatus;
+use App\Enums\ExpertScopeStatus;
+use App\Enums\ExpertServiceType;
 use App\Exceptions\InvalidKycTransitionException;
 use App\Models\Admin;
 use App\Models\Expert;
 use App\Models\ExpertKycApplication;
 use App\Models\ExpertKycCredential;
 use App\Models\ExpertKycQualification;
+use App\Notifications\Expert\KycReviewStatusNotification;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -110,9 +113,13 @@ class ExpertKycWorkflow
         return $this->adminTransition($application, $admin, ExpertKycApplicationStatus::Submitted, ExpertKycApplicationStatus::UnderReview);
     }
 
-    public function approve(ExpertKycApplication $application, Admin $admin): ExpertKycApplication
+    public function approve(
+        ExpertKycApplication $application,
+        Admin $admin,
+        array $scopes = [],
+    ): ExpertKycApplication
     {
-        return DB::transaction(function () use ($application, $admin): ExpertKycApplication {
+        $result = DB::transaction(function () use ($application, $admin, $scopes): ExpertKycApplication {
             $locked = ExpertKycApplication::query()->lockForUpdate()->findOrFail($application->getKey());
             $this->assertStatus($locked, ExpertKycApplicationStatus::UnderReview);
             $locked->load(['experiences', 'documents']);
@@ -131,9 +138,14 @@ class ExpertKycWorkflow
                 'decision_reason' => null,
             ])->save();
             $locked->expert()->update(['kyc_status' => ExpertKycStatus::Approved]);
+            $this->replaceVerifiedScopes($locked, $admin, $scopes);
 
             return $this->loadApplication($locked->refresh());
         });
+
+        $this->notifyExpert($result);
+
+        return $result;
     }
 
     public function reject(ExpertKycApplication $application, Admin $admin, string $reason): ExpertKycApplication
@@ -141,9 +153,20 @@ class ExpertKycWorkflow
         return $this->decide($application, $admin, ExpertKycApplicationStatus::Rejected, $reason, ExpertKycStatus::Rejected);
     }
 
-    public function requestInformation(ExpertKycApplication $application, Admin $admin, string $reason): ExpertKycApplication
-    {
-        return $this->decide($application, $admin, ExpertKycApplicationStatus::NeedsInformation, $reason, ExpertKycStatus::Pending);
+    public function requestInformation(
+        ExpertKycApplication $application,
+        Admin $admin,
+        string $reason,
+        array $requestedChanges,
+    ): ExpertKycApplication {
+        return $this->decide(
+            $application,
+            $admin,
+            ExpertKycApplicationStatus::NeedsInformation,
+            $reason,
+            ExpertKycStatus::Pending,
+            $requestedChanges,
+        );
     }
 
     public function loadApplication(ExpertKycApplication $application, bool $withHistory = false): ExpertKycApplication
@@ -151,6 +174,8 @@ class ExpertKycWorkflow
         $relations = [
             'expert:id,name,email,country,language,domain,is_active,kyc_status',
             'reviewedBy:id,name,email',
+            'sourceApplication:id,reference,attempt_number,status,decision_reason,requested_changes,decided_at',
+            'verifiedScopes',
             'experiences',
             'qualifications.document',
             'credentials.document',
@@ -189,6 +214,7 @@ class ExpertKycWorkflow
         $target = $expert->kycApplications()->create([
             'reference' => $this->reference(),
             'attempt_number' => $source->attempt_number + 1,
+            'source_application_id' => $source->getKey(),
             'full_name' => $source->full_name,
             'email_snapshot' => $expert->email,
             'country' => $source->country,
@@ -412,20 +438,131 @@ class ExpertKycWorkflow
         ExpertKycApplicationStatus $to,
         string $reason,
         ExpertKycStatus $expertStatus,
+        array $requestedChanges = [],
     ): ExpertKycApplication {
-        return DB::transaction(function () use ($application, $admin, $to, $reason, $expertStatus): ExpertKycApplication {
+        $result = DB::transaction(function () use (
+            $application,
+            $admin,
+            $to,
+            $reason,
+            $expertStatus,
+            $requestedChanges,
+        ): ExpertKycApplication {
             $locked = ExpertKycApplication::query()->lockForUpdate()->findOrFail($application->getKey());
             $this->assertStatus($locked, ExpertKycApplicationStatus::UnderReview);
+            $normalizedChanges = $to === ExpertKycApplicationStatus::NeedsInformation
+                ? $this->normalizeRequestedChanges($locked, $requestedChanges)
+                : null;
             $this->transition($locked, $to, ExpertKycActorType::Admin, $admin->getKey(), $reason);
             $locked->forceFill([
                 'reviewed_by_admin_id' => $admin->getKey(),
                 'decided_at' => now(),
                 'decision_reason' => $reason,
+                'requested_changes' => $normalizedChanges,
             ])->save();
             $locked->expert()->update(['kyc_status' => $expertStatus]);
 
             return $this->loadApplication($locked->refresh(), true);
         });
+
+        $this->notifyExpert($result);
+
+        return $result;
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $requestedChanges
+     * @return array<int, array<string, mixed>>
+     */
+    private function normalizeRequestedChanges(
+        ExpertKycApplication $application,
+        array $requestedChanges,
+    ): array {
+        $documentIds = collect($requestedChanges)
+            ->pluck('documentId')
+            ->filter(fn ($id): bool => $id !== null)
+            ->map(fn ($id): int => (int) $id)
+            ->unique()
+            ->values();
+
+        if ($documentIds->isNotEmpty()) {
+            $ownedCount = $application->documents()->whereKey($documentIds)->count();
+
+            if ($ownedCount !== $documentIds->count()) {
+                throw ValidationException::withMessages([
+                    'requestedChanges' => ['Every referenced document must belong to this KYC application.'],
+                ]);
+            }
+        }
+
+        return array_values(array_map(static fn (array $change): array => [
+            'section' => $change['section'],
+            'field' => $change['field'] ?? null,
+            'document_id' => isset($change['documentId']) ? (int) $change['documentId'] : null,
+            'message' => $change['message'],
+        ], $requestedChanges));
+    }
+
+    private function notifyExpert(ExpertKycApplication $application): void
+    {
+        $application->expert->notify(new KycReviewStatusNotification(
+            $application->reference,
+            $application->status,
+        ));
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $scopes
+     */
+    private function replaceVerifiedScopes(
+        ExpertKycApplication $application,
+        Admin $admin,
+        array $scopes,
+    ): void {
+        $normalized = $scopes !== [] ? $scopes : [[
+            'domain' => $application->domain,
+            'jurisdiction' => $application->jurisdiction,
+            'role' => 'consultant',
+            'serviceTypes' => [
+                ExpertServiceType::WrittenConsultation->value,
+                ExpertServiceType::DocumentReview->value,
+            ],
+            'languages' => $this->scopeLanguages($application->language),
+            'validUntil' => null,
+        ]];
+
+        $application->expert->verifiedScopes()
+            ->where('status', ExpertScopeStatus::Active->value)
+            ->where('domain', $application->domain)
+            ->update(['status' => ExpertScopeStatus::Revoked->value]);
+
+        foreach ($normalized as $scope) {
+            $application->expert->verifiedScopes()->create([
+                'kyc_application_id' => $application->getKey(),
+                'verified_by_admin_id' => $admin->getKey(),
+                'domain' => $scope['domain'],
+                'jurisdiction' => $scope['jurisdiction'],
+                'role' => $scope['role'],
+                'service_types' => array_values($scope['serviceTypes']),
+                'languages' => array_values($scope['languages']),
+                'status' => ExpertScopeStatus::Active,
+                'valid_from' => today(),
+                'valid_until' => $scope['validUntil'] ?? null,
+            ]);
+        }
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function scopeLanguages(?string $language): array
+    {
+        $languages = array_values(array_filter(
+            preg_split('/[-,]/', (string) $language) ?: [],
+            static fn (string $value): bool => in_array($value, ['ar', 'en'], true),
+        ));
+
+        return $languages !== [] ? array_values(array_unique($languages)) : ['en'];
     }
 
     private function transition(

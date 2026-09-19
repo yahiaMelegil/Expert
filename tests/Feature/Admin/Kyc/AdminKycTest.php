@@ -7,8 +7,10 @@ use App\Models\Admin;
 use App\Models\Expert;
 use App\Models\ExpertKycApplication;
 use App\Models\User;
+use App\Notifications\Expert\KycReviewStatusNotification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\Sanctum;
 use Tests\TestCase;
@@ -51,6 +53,7 @@ class AdminKycTest extends TestCase
 
     public function test_admin_can_review_all_documents_and_approve_a_complete_application(): void
     {
+        Notification::fake();
         $application = $this->submittedApplication();
         $admin = Admin::factory()->create();
         Sanctum::actingAs($admin, [Admin::ACCESS_ABILITY]);
@@ -65,9 +68,20 @@ class AdminKycTest extends TestCase
             ])->assertOk();
         }
 
-        $this->postJson("/api/admin/kyc/applications/{$application->id}/approve")
+        $this->postJson("/api/admin/kyc/applications/{$application->id}/approve", [
+            'scopes' => [[
+                'domain' => 'legal',
+                'jurisdiction' => 'Jordan',
+                'role' => 'Legal consultant',
+                'serviceTypes' => ['written_consultation', 'document_review'],
+                'languages' => ['ar', 'en'],
+                'validUntil' => now()->addYear()->toDateString(),
+            ]],
+        ])
             ->assertOk()
-            ->assertJsonPath('data.application.status', 'verified');
+            ->assertJsonPath('data.application.status', 'verified')
+            ->assertJsonPath('data.application.verifiedScopes.0.role', 'Legal consultant')
+            ->assertJsonPath('data.application.verifiedScopes.0.isEffective', true);
 
         $this->assertSame(ExpertKycStatus::Approved, $application->expert->refresh()->kyc_status);
         $this->assertDatabaseHas('expert_kyc_applications', [
@@ -75,7 +89,21 @@ class AdminKycTest extends TestCase
             'reviewed_by_admin_id' => $admin->id,
             'status' => 'verified',
         ]);
+        $this->assertDatabaseHas('expert_verified_scopes', [
+            'expert_id' => $application->expert_id,
+            'kyc_application_id' => $application->id,
+            'verified_by_admin_id' => $admin->id,
+            'domain' => 'legal',
+            'jurisdiction' => 'Jordan',
+            'role' => 'Legal consultant',
+            'status' => 'active',
+        ]);
         $this->assertDatabaseCount('expert_kyc_status_histories', 4);
+        Notification::assertSentTo(
+            $application->expert,
+            KycReviewStatusNotification::class,
+            fn (KycReviewStatusNotification $notification): bool => $notification->status->value === 'verified',
+        );
     }
 
     public function test_admin_cannot_approve_before_every_document_is_reviewed(): void
@@ -91,6 +119,7 @@ class AdminKycTest extends TestCase
 
     public function test_reject_and_request_information_require_a_reason(): void
     {
+        Notification::fake();
         $application = $this->submittedApplication();
         Sanctum::actingAs(Admin::factory()->create(), [Admin::ACCESS_ABILITY]);
         $this->postJson("/api/admin/kyc/applications/{$application->id}/start-review")->assertOk();
@@ -101,7 +130,58 @@ class AdminKycTest extends TestCase
 
         $this->postJson("/api/admin/kyc/applications/{$application->id}/request-information", [
             'reason' => 'Please upload a clearer identity document.',
-        ])->assertOk()->assertJsonPath('data.application.status', 'needs_information');
+            'requestedChanges' => [[
+                'section' => 'identity_scope',
+                'field' => 'identityEvidence',
+                'documentId' => $application->documents->first()->id,
+                'message' => 'Upload a clear, uncropped identity image.',
+            ]],
+        ])->assertOk()
+            ->assertJsonPath('data.application.status', 'needs_information')
+            ->assertJsonPath('data.application.reviewFeedback.reason', 'Please upload a clearer identity document.')
+            ->assertJsonPath('data.application.reviewFeedback.requestedChanges.0.section', 'identity_scope')
+            ->assertJsonPath('data.application.reviewFeedback.requestedChanges.0.field', 'identityEvidence');
+
+        Notification::assertSentTo(
+            $application->expert,
+            KycReviewStatusNotification::class,
+            fn (KycReviewStatusNotification $notification): bool => $notification->reference === $application->reference,
+        );
+
+        Sanctum::actingAs($application->expert, [Expert::ACCESS_ABILITY]);
+        $this->getJson('/api/expert/kyc')
+            ->assertOk()
+            ->assertJsonPath('data.application.status', 'needs_information')
+            ->assertJsonPath('data.application.reviewFeedback.requestedChanges.0.message', 'Upload a clear, uncropped identity image.');
+
+        $this->putJson('/api/expert/kyc', ['jurisdiction' => 'Jordan'])->assertOk()
+            ->assertJsonPath('data.application.status', 'draft')
+            ->assertJsonPath('data.application.reviewFeedback.reason', 'Please upload a clearer identity document.')
+            ->assertJsonPath('data.application.revisionSource.sourceApplicationId', $application->id);
+
+        $this->assertDatabaseHas('expert_kyc_applications', [
+            'expert_id' => $application->expert_id,
+            'attempt_number' => 2,
+            'source_application_id' => $application->id,
+            'status' => 'draft',
+        ]);
+    }
+
+    public function test_requested_change_document_must_belong_to_the_application(): void
+    {
+        $first = $this->submittedApplication('First Expert');
+        $second = $this->submittedApplication('Second Expert');
+        Sanctum::actingAs(Admin::factory()->create(), [Admin::ACCESS_ABILITY]);
+        $this->postJson("/api/admin/kyc/applications/{$first->id}/start-review")->assertOk();
+
+        $this->postJson("/api/admin/kyc/applications/{$first->id}/request-information", [
+            'reason' => 'A document needs to be replaced.',
+            'requestedChanges' => [[
+                'section' => 'identity_scope',
+                'documentId' => $second->documents->first()->id,
+                'message' => 'Replace this document.',
+            ]],
+        ])->assertUnprocessable()->assertJsonValidationErrors('requestedChanges.0.documentId');
     }
 
     public function test_repeated_or_conflicting_admin_decisions_are_rejected(): void

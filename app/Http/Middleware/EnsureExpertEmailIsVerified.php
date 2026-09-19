@@ -16,7 +16,7 @@ class EnsureExpertEmailIsVerified
         if (! $expert instanceof Expert || ! $expert->hasVerifiedEmail()) {
             return response()->json([
                 'status' => false,
-                'message' => 'Your email address must be verified before using KYC.',
+                'message' => 'Your email address must be verified before using the expert workspace.',
             ], 403);
         }
 

@@ -17,6 +17,7 @@ class ExpertKycApplication extends Model
     protected $fillable = [
         'reference',
         'attempt_number',
+        'source_application_id',
         'full_name',
         'email_snapshot',
         'country',
@@ -30,6 +31,7 @@ class ExpertKycApplication extends Model
     {
         return [
             'status' => ExpertKycApplicationStatus::class,
+            'requested_changes' => 'array',
             'submitted_at' => 'datetime',
             'review_started_at' => 'datetime',
             'decided_at' => 'datetime',
@@ -44,6 +46,16 @@ class ExpertKycApplication extends Model
     public function reviewedBy(): BelongsTo
     {
         return $this->belongsTo(Admin::class, 'reviewed_by_admin_id');
+    }
+
+    public function sourceApplication(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'source_application_id');
+    }
+
+    public function retryApplications(): HasMany
+    {
+        return $this->hasMany(self::class, 'source_application_id');
     }
 
     public function experiences(): HasMany
@@ -69,5 +81,10 @@ class ExpertKycApplication extends Model
     public function statusHistories(): HasMany
     {
         return $this->hasMany(ExpertKycStatusHistory::class, 'application_id')->latest('created_at');
+    }
+
+    public function verifiedScopes(): HasMany
+    {
+        return $this->hasMany(ExpertVerifiedScope::class, 'kyc_application_id');
     }
 }

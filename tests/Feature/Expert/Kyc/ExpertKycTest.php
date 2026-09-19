@@ -168,6 +168,10 @@ class ExpertKycTest extends TestCase
         $this->assertSame(ExpertKycStatus::Pending, $expert->refresh()->kyc_status);
         $this->putJson('/api/expert/kyc', ['fullName' => 'Changed'])
             ->assertStatus(409);
+
+        $document = ExpertKycDocument::query()->firstOrFail();
+        $this->deleteJson('/api/expert/kyc/documents/'.$document->id)
+            ->assertStatus(409);
     }
 
     public function test_expert_cannot_access_another_experts_document(): void
@@ -226,6 +230,12 @@ class ExpertKycTest extends TestCase
         $this->postJson("/api/admin/kyc/applications/{$firstAttempt->id}/start-review")->assertOk();
         $this->postJson("/api/admin/kyc/applications/{$firstAttempt->id}/request-information", [
             'reason' => 'Upload a clearer identity image.',
+            'requestedChanges' => [[
+                'section' => 'identity_scope',
+                'field' => 'identityEvidence',
+                'documentId' => $identity->id,
+                'message' => 'The identity image is not readable.',
+            ]],
         ])->assertOk();
 
         $this->actingAsExpert($expert);

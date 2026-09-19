@@ -121,11 +121,21 @@ class ExpertKycDocumentStorage
 
     public function delete(ExpertKycDocument $document): void
     {
-        if ($document->application->status !== ExpertKycApplicationStatus::Draft) {
-            throw new InvalidKycTransitionException('Documents can only be changed while the KYC application is a draft.');
-        }
+        DB::transaction(function () use ($document): void {
+            $lockedApplication = ExpertKycApplication::query()
+                ->lockForUpdate()
+                ->findOrFail($document->application_id);
 
-        DB::transaction(fn () => $this->deleteRecords(new Collection([$document])));
+            if ($lockedApplication->status !== ExpertKycApplicationStatus::Draft) {
+                throw new InvalidKycTransitionException('Documents can only be changed while the KYC application is a draft.');
+            }
+
+            $lockedDocument = ExpertKycDocument::query()
+                ->lockForUpdate()
+                ->findOrFail($document->getKey());
+
+            $this->deleteRecords(new Collection([$lockedDocument]));
+        });
     }
 
     /**

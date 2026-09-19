@@ -64,6 +64,21 @@ class Expert extends Authenticatable implements MustVerifyEmail
         return $this->hasOne(ExpertKycApplication::class)->ofMany('attempt_number', 'max');
     }
 
+    public function profile(): HasOne
+    {
+        return $this->hasOne(ExpertProfile::class);
+    }
+
+    public function availability(): HasOne
+    {
+        return $this->hasOne(ExpertAvailabilitySetting::class);
+    }
+
+    public function verifiedScopes(): HasMany
+    {
+        return $this->hasMany(ExpertVerifiedScope::class);
+    }
+
     /**
      * Get the attributes that should be cast.
      *

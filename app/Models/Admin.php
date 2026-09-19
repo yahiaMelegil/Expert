@@ -24,6 +24,11 @@ class Admin extends Authenticatable
         return $this->hasMany(ExpertKycApplication::class, 'reviewed_by_admin_id');
     }
 
+    public function verifiedExpertScopes(): HasMany
+    {
+        return $this->hasMany(ExpertVerifiedScope::class, 'verified_by_admin_id');
+    }
+
     /**
      * Get the attributes that should be cast.
      *

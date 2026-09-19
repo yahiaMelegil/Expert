@@ -3,6 +3,8 @@
 namespace App\Http\Resources\Expert\Kyc;
 
 use App\Enums\ExpertKycDocumentType;
+use App\Http\Resources\Expert\Profile\VerifiedScopeResource;
+use App\Models\ExpertKycApplication;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -59,14 +61,56 @@ class KycApplicationResource extends JsonResource
             ),
             'payoutReadiness' => $this->payout_readiness,
             'decisionReason' => $this->decision_reason,
+            'requestedChanges' => $this->requestedChanges($this->resource),
+            'reviewFeedback' => $this->reviewFeedback(),
+            'verifiedScopes' => VerifiedScopeResource::collection($this->whenLoaded('verifiedScopes')),
+            'revisionSource' => $this->sourceApplication
+                ? $this->feedbackPayload($this->sourceApplication)
+                : null,
             'submittedAt' => $this->submitted_at?->toISOString(),
             'reviewStartedAt' => $this->review_started_at?->toISOString(),
             'decidedAt' => $this->decided_at?->toISOString(),
             'createdAt' => $this->created_at?->toISOString(),
             'updatedAt' => $this->updated_at?->toISOString(),
-            'canEdit' => $this->status->value === 'draft',
+            'canEdit' => $this->status->value === 'draft' || $this->status->canStartNewAttempt(),
             'canResubmit' => $this->status->canStartNewAttempt(),
         ];
+    }
+
+    private function reviewFeedback(): ?array
+    {
+        if ($this->status->canStartNewAttempt()) {
+            return $this->feedbackPayload($this->resource);
+        }
+
+        if ($this->status->value === 'draft' && $this->sourceApplication?->status?->canStartNewAttempt()) {
+            return $this->feedbackPayload($this->sourceApplication);
+        }
+
+        return null;
+    }
+
+    private function feedbackPayload(ExpertKycApplication $application): array
+    {
+        return [
+            'sourceApplicationId' => $application->id,
+            'sourceReference' => $application->reference,
+            'sourceAttemptNumber' => $application->attempt_number,
+            'status' => $application->status->value,
+            'reason' => $application->decision_reason,
+            'requestedChanges' => $this->requestedChanges($application),
+            'decidedAt' => $application->decided_at?->toISOString(),
+        ];
+    }
+
+    private function requestedChanges(ExpertKycApplication $application): array
+    {
+        return array_values(array_map(static fn (array $change): array => [
+            'section' => $change['section'] ?? 'other',
+            'field' => $change['field'] ?? null,
+            'documentId' => $change['document_id'] ?? null,
+            'message' => $change['message'] ?? '',
+        ], $application->requested_changes ?? []));
     }
 
     private function documentOfType(ExpertKycDocumentType $type)

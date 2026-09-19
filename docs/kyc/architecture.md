@@ -5,7 +5,7 @@
 | Table | Purpose |
 |---|---|
 | `experts` | Expert account, registration context, and coarse KYC status |
-| `expert_kyc_applications` | One immutable review attempt after submission |
+| `expert_kyc_applications` | One immutable review attempt after submission, its retry lineage, and structured review feedback |
 | `expert_kyc_experiences` | Experience entries belonging to an attempt |
 | `expert_kyc_qualifications` | Qualification entries belonging to an attempt |
 | `expert_kyc_credentials` | Certificate and license entries belonging to an attempt |
@@ -28,6 +28,7 @@ draft -> submitted -> under_review -> verified
 - Approval, rejection, and information requests are allowed only from `under_review`.
 - Approval requires every document to have been reviewed.
 - Rejection and information requests require a reason.
+- Information requests also require one or more structured change items.
 - `verified` is terminal.
 - Sensitive transitions use a database transaction and `lockForUpdate()` to prevent conflicting decisions.
 
@@ -48,6 +49,6 @@ This snapshot preserves the reviewed identity and scope even if the account chan
 
 ## Retry Behavior
 
-The first save after `rejected` or `needs_information` creates a new draft attempt by copying the previous attempt's structured data and document references. Replacing a copied document does not remove the physical file while an earlier attempt still references it. This preserves the audit trail without duplicating file bytes.
+The first save after `rejected` or `needs_information` creates a new draft attempt by copying the previous attempt's structured data and document references. The new attempt stores `source_application_id`, while the original attempt retains its decision reason and `requested_changes`. The API resolves this lineage into `reviewFeedback`, so instructions remain visible throughout correction. Replacing a copied document does not remove the physical file while an earlier attempt still references it. This preserves the audit trail without duplicating file bytes.
 
 The KYC workflow intentionally does not modify authentication eligibility. `is_active` remains the account availability control, and experts awaiting review can still authenticate.
